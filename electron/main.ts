@@ -604,9 +604,17 @@ if (isProd) {
 
   ipcMain.on('install-update', () => {
     log.info('[updater] install-update requested, calling quitAndInstall')
-    // isSilent=true, isForceRunAfter=false — let the user reopen manually.
-    // forceRunAfter=true is unreliable on macOS without notarisation (open -a gets blocked).
-    autoUpdater.quitAndInstall(true, false)
+    if (process.platform === 'darwin') {
+      // On unsigned macOS builds, Squirrel's open -a relaunch is blocked by Gatekeeper.
+      // Instead, relaunch via app.relaunch() before quitting so the OS spawns the new
+      // binary directly from its path rather than going through Squirrel's open -a.
+      setImmediate(() => {
+        app.relaunch()
+        autoUpdater.quitAndInstall(true, false)
+      })
+    } else {
+      autoUpdater.quitAndInstall(true, false)
+    }
   })
 
   // Check once the first window finishes loading, then every 4 hours

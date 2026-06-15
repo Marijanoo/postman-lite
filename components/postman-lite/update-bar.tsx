@@ -32,7 +32,7 @@ export function UpdateBar({ progress, downloaded, onInstall, onDismiss }: Update
       {downloaded ? (
         <div className="flex items-center gap-2">
           <button onClick={onInstall} className="text-xs font-medium text-primary hover:text-primary/80 transition-colors whitespace-nowrap">
-            {isMac ? 'Quit & update' : 'Restart to update'}
+            {isMac ? 'Relaunch to update' : 'Restart to update'}
           </button>
           <span className="text-primary/30">·</span>
           <button onClick={onDismiss} className="text-xs text-primary/60 hover:text-primary transition-colors whitespace-nowrap">
