@@ -1,11 +1,12 @@
 import { generateId } from '@/lib/utils'
 import type { Collection, RequestConfig, KeyValuePair, AuthConfig, BodyType, HttpMethod } from '@/lib/db/types'
 
+type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue }
+
 export function parseYaml(text: string): unknown {
   try { return JSON.parse(text) } catch {}
 
   const lines = text.split('\n')
-  type YamlValue = string | number | boolean | null | YamlValue[] | Record<string, YamlValue>
 
   const parseValue = (raw: string): YamlValue => {
     const v = raw.trim()

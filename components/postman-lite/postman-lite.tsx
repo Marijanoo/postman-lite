@@ -17,6 +17,7 @@ import {
 } from '@/hooks/use-database'
 import { parseVariables } from '@/lib/variable-parser'
 import { splitUrl, searchToParams } from '@/lib/url-params'
+import { buildRequest } from '@/lib/build-request'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -384,68 +385,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
       const request = { ...activeTab.request, ...(urlOverride !== undefined ? { url: urlOverride } : {}) }
       const envVariables = activeEnvironment?.variables || []
 
-      // Parse variables in URL
-      let url = parseVariables(request.url, envVariables)
-
-      // Add query params to URL
-      const enabledParams = request.params.filter((p) => p.enabled && p.key)
-      if (enabledParams.length > 0) {
-        const params = new URLSearchParams()
-        enabledParams.forEach((p) => {
-          params.append(p.key, parseVariables(p.value, envVariables))
-        })
-        const separator = url.includes('?') ? '&' : '?'
-        url = `${url}${separator}${params.toString()}`
-      }
-
-      // Build headers
-      const headers: Record<string, string> = {}
-      request.headers
-        .filter((h) => h.enabled && h.key)
-        .forEach((h) => {
-          headers[parseVariables(h.key, envVariables)] = parseVariables(h.value, envVariables)
-        })
-
-      // Add auth headers
-      if (request.auth.type === 'bearer' && request.auth.bearer?.token) {
-        headers['Authorization'] = `Bearer ${parseVariables(request.auth.bearer.token, envVariables)}`
-      } else if (request.auth.type === 'basic' && request.auth.basic) {
-        const { username, password } = request.auth.basic
-        const encoded = btoa(`${parseVariables(username, envVariables)}:${parseVariables(password, envVariables)}`)
-        headers['Authorization'] = `Basic ${encoded}`
-      } else if (request.auth.type === 'api-key' && request.auth.apiKey) {
-        if (request.auth.apiKey.addTo === 'header') {
-          headers[request.auth.apiKey.key] = parseVariables(request.auth.apiKey.value, envVariables)
-        } else {
-          const separator = url.includes('?') ? '&' : '?'
-          url = `${url}${separator}${request.auth.apiKey.key}=${encodeURIComponent(parseVariables(request.auth.apiKey.value, envVariables))}`
-        }
-      }
-
-      // Build body
-      let requestBody: string | undefined
-      let formDataEntries: { key: string; value: string; fileData?: { name: string; base64: string; mimeType: string } }[] | undefined
-      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
-        if (request.body.type === 'json' || request.body.type === 'raw') {
-          requestBody = parseVariables(request.body.content, envVariables)
-          if (request.body.type === 'json' && !headers['Content-Type']) {
-            headers['Content-Type'] = 'application/json'
-          }
-        } else if (request.body.type === 'x-www-form-urlencoded') {
-          const formData = request.body.formData?.filter((f) => f.enabled && f.key) || []
-          const params = new URLSearchParams()
-          formData.forEach((f) => params.append(f.key, parseVariables(f.value, envVariables)))
-          requestBody = params.toString()
-          headers['Content-Type'] = 'application/x-www-form-urlencoded'
-        } else if (request.body.type === 'form-data') {
-          const formData = request.body.formData?.filter((f) => f.enabled && f.key) || []
-          formDataEntries = formData.map(f => ({
-            key: parseVariables(f.key, envVariables),
-            value: parseVariables(f.value, envVariables),
-            fileData: f.fileData,
-          }))
-        }
-      }
+      const { url, method, headers, requestBody, formDataEntries } = buildRequest(request, envVariables)
 
       let responseData: ResponseData;
 
@@ -455,7 +395,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
         activeElectronRequestIdRef.current = requestId
         const result = await window.electronAPI.makeRequest({
           url,
-          method: request.method,
+          method,
           headers,
           requestBody,
           formDataEntries,
@@ -471,7 +411,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             url,
-            method: request.method,
+            method,
             headers,
             requestBody,
             formDataEntries,
@@ -542,53 +482,11 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
   // Standalone request runner used by sequences (does not touch tab state)
   const runSingleRequest = useCallback(async (request: RequestConfig, signal?: AbortSignal, envVariablesOverride?: EnvironmentVariable[]): Promise<ResponseData> => {
     const envVariables = envVariablesOverride ?? activeEnvironment?.variables ?? []
-    let url = parseVariables(request.url, envVariables)
-    const enabledParams = request.params.filter(p => p.enabled && p.key)
-    if (enabledParams.length > 0) {
-      const params = new URLSearchParams()
-      enabledParams.forEach(p => params.append(p.key, parseVariables(p.value, envVariables)))
-      url += (url.includes('?') ? '&' : '?') + params.toString()
-    }
-    const headers: Record<string, string> = {}
-    request.headers.filter(h => h.enabled && h.key).forEach(h => {
-      headers[parseVariables(h.key, envVariables)] = parseVariables(h.value, envVariables)
-    })
-    if (request.auth.type === 'bearer' && request.auth.bearer?.token) {
-      headers['Authorization'] = `Bearer ${parseVariables(request.auth.bearer.token, envVariables)}`
-    } else if (request.auth.type === 'basic' && request.auth.basic) {
-      const { username, password } = request.auth.basic
-      headers['Authorization'] = `Basic ${btoa(`${parseVariables(username, envVariables)}:${parseVariables(password, envVariables)}`)}`
-    } else if (request.auth.type === 'api-key' && request.auth.apiKey) {
-      if (request.auth.apiKey.addTo === 'header') {
-        headers[request.auth.apiKey.key] = parseVariables(request.auth.apiKey.value, envVariables)
-      } else {
-        url += (url.includes('?') ? '&' : '?') + `${request.auth.apiKey.key}=${encodeURIComponent(parseVariables(request.auth.apiKey.value, envVariables))}`
-      }
-    }
-    let requestBody: string | undefined
-    let formDataEntries: { key: string; value: string; fileData?: { name: string; base64: string; mimeType: string } }[] | undefined
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
-      if (request.body.type === 'json' || request.body.type === 'raw') {
-        requestBody = parseVariables(request.body.content, envVariables)
-        if (request.body.type === 'json' && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
-      } else if (request.body.type === 'x-www-form-urlencoded') {
-        const fd = request.body.formData?.filter(f => f.enabled && f.key) || []
-        const p = new URLSearchParams()
-        fd.forEach(f => p.append(f.key, parseVariables(f.value, envVariables)))
-        requestBody = p.toString()
-        headers['Content-Type'] = 'application/x-www-form-urlencoded'
-      } else if (request.body.type === 'form-data') {
-        formDataEntries = (request.body.formData?.filter(f => f.enabled && f.key) || []).map(f => ({
-          key: parseVariables(f.key, envVariables),
-          value: parseVariables(f.value, envVariables),
-          fileData: f.fileData,
-        }))
-      }
-    }
+    const { url, method, headers, requestBody, formDataEntries } = buildRequest(request, envVariables)
     if (typeof window !== 'undefined' && window.electronAPI) {
       const requestId = generateId()
       sequenceElectronRequestIdRef.current = requestId
-      const result = await window.electronAPI.makeRequest({ url, method: request.method, headers, requestBody, requestId })
+      const result = await window.electronAPI.makeRequest({ url, method, headers, requestBody, formDataEntries, requestId })
       sequenceElectronRequestIdRef.current = null
       if (result?.aborted || signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       return result
@@ -596,7 +494,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
     const res = await fetch('/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, method: request.method, headers, requestBody, formDataEntries }),
+      body: JSON.stringify({ url, method, headers, requestBody, formDataEntries }),
       signal,
     })
     return res.json()

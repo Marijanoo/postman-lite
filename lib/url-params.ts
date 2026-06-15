@@ -1,6 +1,20 @@
 import type { KeyValuePair } from '@/lib/db/types'
 import { createKeyValuePair } from '@/lib/db/types'
 
+// Ensure a URL has a scheme. A bare host (with or without a dot, e.g. "myhost/path"
+// or "localhost:3000") gets "http://" prepended, matching how curl treats a
+// scheme-less argument. URLs that already carry a scheme (http://, https://, ws://,
+// or any "scheme://") are left untouched.
+export function ensureProtocol(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return trimmed
+  // Already has a scheme like "http://", "https://", "ws://", "{{var}}://" etc.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed
+  // Leave unresolved variable-only URLs alone — they'll be flagged downstream.
+  if (trimmed.startsWith('{{')) return trimmed
+  return `http://${trimmed}`
+}
+
 export function splitUrl(url: string): { base: string; search: string } {
   let depth = 0
   for (let i = 0; i < url.length; i++) {
@@ -11,10 +25,30 @@ export function splitUrl(url: string): { base: string; search: string } {
   return { base: url, search: '' }
 }
 
+// Encode a query-string component with standard percent-encoding (spaces as
+// %20). We deliberately do NOT use the '+'-for-space convention on encode: it
+// makes a literal '+' in a value ambiguous on round-trip. A space becomes %20
+// and a literal '+' becomes %2B, so the two never collide.
+function encodeComponent(s: string): string {
+  return encodeURIComponent(s)
+}
+
+// Decode tolerantly. We still treat '+' as a space here so that a query string
+// pasted from elsewhere (which may use the '+' convention) decodes sensibly;
+// our own encoder never emits a bare '+', so this only affects external input.
+function decodeComponent(s: string): string {
+  try {
+    return decodeURIComponent(s.replace(/\+/g, ' '))
+  } catch {
+    // Malformed percent-sequence — return as-is rather than throwing.
+    return s
+  }
+}
+
 export function paramsToSearch(params: KeyValuePair[]): string {
   return params
     .filter(p => p.enabled && p.key)
-    .map(p => p.value ? `${p.key}=${p.value}` : p.key)
+    .map(p => p.value ? `${encodeComponent(p.key)}=${encodeComponent(p.value)}` : `${encodeComponent(p.key)}=`)
     .join('&')
 }
 
@@ -22,8 +56,8 @@ export function searchToParams(search: string, existing: KeyValuePair[]): KeyVal
   if (!search) return []
   const pairs = search.split('&').map(part => {
     const eq = part.indexOf('=')
-    const key = eq === -1 ? part : part.slice(0, eq)
-    const value = eq === -1 ? '' : part.slice(eq + 1)
+    const key = decodeComponent(eq === -1 ? part : part.slice(0, eq))
+    const value = eq === -1 ? '' : decodeComponent(part.slice(eq + 1))
     const found = existing.find(p => p.key === key)
     return found ? { ...found, value, enabled: true } : { ...createKeyValuePair(key, value), enabled: true }
   })

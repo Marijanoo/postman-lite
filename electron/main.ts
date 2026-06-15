@@ -415,14 +415,10 @@ app.on('ready', () => {
         }
       }
 
-      // Ensure URL has a protocol
-      let finalUrl = url
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        // If it looks like a hostname or IP, add http://
-        if (url.includes('.') || url.includes('localhost') || url.includes('127.0.0.1')) {
-          finalUrl = `http://${url}`
-        }
-      }
+      // Ensure URL has a protocol. The renderer normalizes this too; this is a
+      // safety net. A scheme-less host (with or without a dot) gets http://,
+      // matching curl's behavior.
+      const finalUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `http://${url}`
 
       const response = await fetch(finalUrl, fetchOptions)
 

@@ -9,9 +9,9 @@ export function parseVariables(text: string, variables: EnvironmentVariable[]): 
   if (!text) return text
 
   return text.replace(VARIABLE_PATTERN, (match, variableName) => {
-    const trimmedName = variableName.trim().toLowerCase()
+    const trimmedName = variableName.trim()
     const variable = variables.find(
-      (v) => v.key.trim().toLowerCase() === trimmedName && v.enabled
+      (v) => v.key.trim() === trimmedName && v.enabled
     )
     return variable ? variable.value : match
   })

@@ -3,7 +3,9 @@ const nextConfig = {
   // 'export' is only needed for electron:build (generates static out/ folder).
   ...(process.env.NODE_ENV === 'production' ? { output: 'export' } : {}),
   typescript: {
-    ignoreBuildErrors: true,
+    // Type errors fail the build. Run `npm run typecheck` to check both the
+    // Next.js app and the Electron project without building.
+    ignoreBuildErrors: false,
   },
   images: {
     unoptimized: true,
