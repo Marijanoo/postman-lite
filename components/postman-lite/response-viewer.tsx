@@ -92,7 +92,7 @@ export function ResponseViewer({ response, isLoading, historyTimestamp, scrollRe
 
   const downloadBinary = () => {
     if (!blobUrl || !response) return
-    const cd = response.headers['content-disposition'] || ''
+    const cd = response.headers?.['content-disposition'] || ''
     const nameMatch = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
     const ext = response.contentType?.split('/')[1]?.split(';')[0] || 'bin'
     const filename = nameMatch?.[1]?.replace(/['"]/g, '') || `download.${ext}`
@@ -122,9 +122,14 @@ export function ResponseViewer({ response, isLoading, historyTimestamp, scrollRe
     )
   }
 
+  // A response can arrive with fields missing (empty/HEAD responses, results from
+  // the `any`-typed Electron IPC bridge, or older persisted tabs). Normalize the
+  // fields we read so the viewer never crashes on undefined.
+  const body = response.body ?? ''
+  const headers = response.headers ?? {}
   const ct = response.contentType || ''
   const isHtml = ct.includes('text/html') || ct.includes('application/xhtml') ||
-                 response.body.trimStart().startsWith('<!')
+                 body.trimStart().startsWith('<!')
   const isImage = response.isBinary && ct.startsWith('image/')
   const isPdf   = response.isBinary && ct.includes('application/pdf')
   const isAudio = response.isBinary && ct.startsWith('audio/')
@@ -193,7 +198,7 @@ export function ResponseViewer({ response, isLoading, historyTimestamp, scrollRe
             </TabsTrigger>
           )}
           <TabsTrigger value="headers" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">
-            Headers ({Object.keys(response.headers).length})
+            Headers ({Object.keys(headers).length})
           </TabsTrigger>
         </TabsList>
 
@@ -218,7 +223,7 @@ export function ResponseViewer({ response, isLoading, historyTimestamp, scrollRe
               )}
             </div>
           ) : (
-            <CodeViewer data={response.body} language={ct.includes('application/json') ? 'json' : isHtml ? 'html' : 'auto'} className="h-full" scrollResetKey={scrollResetKey} />
+            <CodeViewer data={body} language={ct.includes('application/json') ? 'json' : isHtml ? 'html' : 'auto'} className="h-full" scrollResetKey={scrollResetKey} />
           )}
         </TabsContent>
 
@@ -258,7 +263,7 @@ export function ResponseViewer({ response, isLoading, historyTimestamp, scrollRe
             <div className="flex-1 min-h-0 overflow-auto">
               {previewMode === 'raw' && response.isBinary ? (
                 <div className="p-4">
-                  <CodeViewer data={response.body} language="auto" />
+                  <CodeViewer data={body} language="auto" />
                 </div>
               ) : isImage ? (
                 <div
@@ -303,7 +308,7 @@ export function ResponseViewer({ response, isLoading, historyTimestamp, scrollRe
                 </div>
               ) : isHtml ? (
                 <iframe
-                  srcDoc={injectBaseHref(response.body, response.url)}
+                  srcDoc={injectBaseHref(body, response.url)}
                   title="HTML Preview"
                   className="w-full h-full border-none bg-white"
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
@@ -318,7 +323,7 @@ export function ResponseViewer({ response, isLoading, historyTimestamp, scrollRe
         {/* Headers tab */}
         <TabsContent value="headers" className="flex-1 overflow-auto m-0 p-4">
           <div className="space-y-1">
-            {Object.entries(response.headers).map(([key, value]) => (
+            {Object.entries(headers).map(([key, value]) => (
               <div key={key} className="flex gap-4 py-1 text-sm font-mono border-b border-border/30 last:border-0">
                 <span className="text-muted-foreground min-w-[200px] shrink-0">{key}</span>
                 <span className="text-foreground break-all">{value}</span>

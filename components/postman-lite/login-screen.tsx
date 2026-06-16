@@ -10,14 +10,11 @@ import { useAuth } from '@/lib/auth/auth-context'
 
 type Mode = 'login' | 'register'
 
-export function LoginScreen() {
+// The credential form itself — reused by the full-screen LoginScreen and by the
+// on-demand LoginDialog. Calls onSuccess once authentication completes.
+export function LoginForm({ onSuccess }: { onSuccess?: () => void } = {}) {
   const { login, register } = useAuth()
-  const [isElectron, setIsElectron] = useState(false)
   const [mode, setMode] = useState<Mode>('login')
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.electronAPI) setIsElectron(true)
-  }, [])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -38,6 +35,7 @@ export function LoginScreen() {
         }
         await register(email, password, name.trim())
       }
+      onSuccess?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -49,6 +47,99 @@ export function LoginScreen() {
     setMode(next)
     setError('')
   }
+
+  return (
+    <div className="w-full max-w-sm space-y-6">
+      {/* Logo / title */}
+      <div className="space-y-1 text-center">
+        <div className="flex justify-center mb-3">
+          <Image src="/logo.png" alt="Quence" width={56} height={56} />
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {mode === 'login' ? 'Sign in' : 'Create account'}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {mode === 'login'
+            ? 'Enter your credentials to continue'
+            : 'Fill in the details below to get started'}
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {mode === 'register' && (
+          <div className="space-y-1.5">
+            <Label htmlFor="name">Name</Label>
+            <Input
+              id="name"
+              type="text"
+              placeholder="Your name"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              autoComplete="name"
+              required
+              disabled={loading}
+            />
+          </div>
+        )}
+
+        <div className="space-y-1.5">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            autoComplete={mode === 'login' ? 'username' : 'email'}
+            required
+            disabled={loading}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            required
+            disabled={loading}
+          />
+        </div>
+
+        {error && (
+          <p className="text-sm text-destructive">{error}</p>
+        )}
+
+        <Button type="submit" className="w-full" disabled={loading}>
+          {loading && <Loader2 className="animate-spin" />}
+          {mode === 'login' ? 'Sign in' : 'Create account'}
+        </Button>
+      </form>
+
+      <p className="text-center text-sm text-muted-foreground">
+        {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
+        <button
+          type="button"
+          onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
+          className="text-primary underline-offset-4 hover:underline font-medium"
+        >
+          {mode === 'login' ? 'Sign up' : 'Sign in'}
+        </button>
+      </p>
+    </div>
+  )
+}
+
+export function LoginScreen() {
+  const [isElectron, setIsElectron] = useState(false)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.electronAPI) setIsElectron(true)
+  }, [])
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -92,88 +183,7 @@ export function LoginScreen() {
       </div>
 
       <div className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-sm space-y-6">
-          {/* Logo / title */}
-          <div className="space-y-1 text-center">
-            <div className="flex justify-center mb-3">
-              <Image src="/logo.png" alt="Quence" width={56} height={56} />
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {mode === 'login' ? 'Sign in' : 'Create account'}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {mode === 'login'
-                ? 'Enter your credentials to continue'
-                : 'Fill in the details below to get started'}
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === 'register' && (
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Name</Label>
-                <Input
-                  id="name"
-                  type="text"
-                  placeholder="Your name"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  autoComplete="name"
-                  required
-                  disabled={loading}
-                />
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                autoComplete={mode === 'login' ? 'username' : 'email'}
-                required
-                disabled={loading}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                required
-                disabled={loading}
-              />
-            </div>
-
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
-
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading && <Loader2 className="animate-spin" />}
-              {mode === 'login' ? 'Sign in' : 'Create account'}
-            </Button>
-          </form>
-
-          <p className="text-center text-sm text-muted-foreground">
-            {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
-            <button
-              type="button"
-              onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
-              className="text-primary underline-offset-4 hover:underline font-medium"
-            >
-              {mode === 'login' ? 'Sign up' : 'Sign in'}
-            </button>
-          </p>
-        </div>
+        <LoginForm />
       </div>
     </div>
   )

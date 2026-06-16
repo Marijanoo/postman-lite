@@ -26,21 +26,12 @@ export function EnvironmentSelector({
         <button className="flex items-center gap-1.5 px-2 h-6 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
           <Settings className="h-3.5 w-3.5 shrink-0" />
           <span className="text-xs font-medium max-w-32 truncate">
-            {activeEnvironment?.name ?? 'No Environment'}
+            {activeEnvironment?.name ?? 'Default Environment'}
           </span>
           <ChevronDown className="h-3 w-3 shrink-0" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[180px]">
-        <DropdownMenuItem
-          onClick={() => onSelect(null)}
-          className="flex items-center gap-2"
-        >
-          <span className="w-3.5 shrink-0">
-            {!activeEnvironment && <Check className="h-3.5 w-3.5 text-primary" />}
-          </span>
-          No Environment
-        </DropdownMenuItem>
         {environments.map((env) => (
           <DropdownMenuItem
             key={env.id}

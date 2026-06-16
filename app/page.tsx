@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/lib/auth/auth-context'
-import { LoginScreen } from '@/components/postman-lite/login-screen'
 import { PostmanLite } from '@/components/postman-lite/postman-lite'
 
 export default function Home() {
@@ -27,10 +26,8 @@ export default function Home() {
     )
   }
 
-  if (state.status === 'unauthenticated') {
-    return <LoginScreen />
-  }
-
+  // No auth gate: the app is fully usable signed-out (local workspaces). Sign-in
+  // is requested on-demand only for cloud workspaces and invites.
   return (
     <PostmanLite
       updateProgress={updateProgress}

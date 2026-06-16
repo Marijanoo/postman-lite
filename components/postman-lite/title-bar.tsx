@@ -33,6 +33,9 @@ interface TitleBarProps {
   canSave?: boolean
   onInviteAccepted?: (workspaceId: string) => void
   onRefreshWorkspaces?: () => Promise<unknown>
+  // Runs the action if signed in, otherwise opens the sign-in dialog and defers
+  // it. Returns true when already authenticated.
+  onRequireAuth?: (reason: string, onAuthed?: () => void) => boolean
 }
 
 function Sep() {
@@ -208,8 +211,9 @@ function MembersDropdown({ onUpdateWorkspace, hook }: { onUpdateWorkspace: (id: 
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-function InviteDropdown({ hook, onUpdateWorkspace, activeWorkspace }: { hook: WorkspaceMembersHook, onUpdateWorkspace: (id: string, data: Partial<Workspace>) => Promise<void>, activeWorkspace: Workspace }) {
+function InviteDropdown({ hook, onUpdateWorkspace, activeWorkspace, signedIn, onRequireAuth }: { hook: WorkspaceMembersHook, onUpdateWorkspace: (id: string, data: Partial<Workspace>) => Promise<void>, activeWorkspace: Workspace, signedIn: boolean, onRequireAuth?: (reason: string, onAuthed?: () => void) => boolean }) {
   const { invite } = hook
+  const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
   const [permission, setPermission] = useState<WorkspacePermission>('read')
   const [loading, setLoading] = useState(false)
@@ -239,7 +243,18 @@ function InviteDropdown({ hook, onUpdateWorkspace, activeWorkspace }: { hook: Wo
   }
 
   return (
-    <DropdownMenu onOpenChange={() => { setEmail(''); setPermission('read'); setError(''); setSent(false) }}>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        // Signed-out users can't invite — prompt sign-in instead of opening.
+        if (next && !signedIn) {
+          onRequireAuth?.('Sign in to invite people to a workspace.')
+          return
+        }
+        setOpen(next)
+        setEmail(''); setPermission('read'); setError(''); setSent(false)
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <button
           className="flex items-center gap-1.5 px-2 h-6 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors text-xs"
@@ -308,6 +323,7 @@ export function TitleBar({
   canSave,
   onInviteAccepted,
   onRefreshWorkspaces,
+  onRequireAuth,
 }: TitleBarProps) {
   const [isElectron, setIsElectron] = useState(false)
   const { state, logout } = useAuth()
@@ -378,7 +394,7 @@ export function TitleBar({
         {isOwner && activeWorkspace && onUpdateWorkspace && (
           <>
             <MembersDropdown onUpdateWorkspace={onUpdateWorkspace} hook={membersHook} />
-            <InviteDropdown hook={membersHook} onUpdateWorkspace={onUpdateWorkspace} activeWorkspace={activeWorkspace} />
+            <InviteDropdown hook={membersHook} onUpdateWorkspace={onUpdateWorkspace} activeWorkspace={activeWorkspace} signedIn={!!user} onRequireAuth={onRequireAuth} />
             <Sep />
           </>
         )}
@@ -454,9 +470,9 @@ export function TitleBar({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <TitleBtn title="Account">
+          <TitleBtn title="Sign in" onClick={() => onRequireAuth?.('Sign in to sync workspaces and collaborate.')}>
             <User className="h-3.5 w-3.5" />
-            Account
+            Sign in
           </TitleBtn>
         )}
 

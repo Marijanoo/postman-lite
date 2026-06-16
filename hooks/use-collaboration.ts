@@ -56,12 +56,27 @@ export function useWorkspaceMembers(workspace: Workspace | null) {
   useEffect(() => { workspaceRef.current = workspace }, [workspace])
 
   const refresh = useCallback(async () => {
-    if (!workspaceRef.current) return
-    const data = await getInvitesForWorkspace(workspaceRef.current.id)
-    setPendingInvites(data)
-  }, [])
+    const ws = workspaceRef.current
+    if (!ws || state.status !== 'authenticated') {
+      setPendingInvites([])
+      return
+    }
+    // Only cloud workspaces have server-side invites; skip the REST call (and the
+    // 401/404 it would throw) for purely local ones.
+    const isCloud = ws.isSynced || (ws.members?.length ?? 0) > 0
+    if (!isCloud) {
+      setPendingInvites([])
+      return
+    }
+    try {
+      const data = await getInvitesForWorkspace(ws.id)
+      setPendingInvites(data)
+    } catch {
+      setPendingInvites([])
+    }
+  }, [state.status])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { refresh() }, [refresh, workspace])
 
   const invite = useCallback(
     async (inviteeEmail: string, permission: WorkspacePermission) => {

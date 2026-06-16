@@ -36,6 +36,7 @@ import {
   Download,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { isDefaultEnv } from '@/lib/default-environment'
 
 interface EnvironmentsPanelProps {
   environments: Environment[]
@@ -208,8 +209,10 @@ export function EnvironmentsPanel({
   }
 
   const handleExportAllEnvironments = () => {
-    if (environments.length === 0) return
-    const data = environments.map(env => ({
+    // The default "No Environment" is local-only and never exported.
+    const exportable = environments.filter(env => !isDefaultEnv(env.id))
+    if (exportable.length === 0) return
+    const data = exportable.map(env => ({
       name: env.name,
       values: env.variables.map(v => ({ key: v.key, value: v.value, enabled: v.enabled }))
     }))
@@ -329,6 +332,7 @@ export function EnvironmentsPanel({
             {environments.map((env) => {
               const isExpanded = expandedEnvs.has(env.id)
               const isActive = activeEnvironment?.id === env.id
+              const isDefault = isDefaultEnv(env.id)
 
               return (
                 <Collapsible
@@ -363,21 +367,27 @@ export function EnvironmentsPanel({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => onSetActive(isActive ? null : env.id)}>
-                          <Check className="h-4 w-4 mr-2" />
-                          {isActive ? 'Deactivate' : 'Set Active'}
-                        </DropdownMenuItem>
-                        {canWrite && (
+                        {/* The default env can't be deactivated (it's the fallback),
+                            renamed, exported, or deleted. */}
+                        {!(isDefault && isActive) && (
+                          <DropdownMenuItem onClick={() => onSetActive(isActive ? null : env.id)}>
+                            <Check className="h-4 w-4 mr-2" />
+                            {isActive ? 'Deactivate' : 'Set Active'}
+                          </DropdownMenuItem>
+                        )}
+                        {canWrite && !isDefault && (
                           <DropdownMenuItem onClick={() => openRenameDialog(env)}>
                             <Pencil className="h-4 w-4 mr-2" />
                             Rename
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem onClick={() => handleExport(env)}>
-                          <Download className="h-4 w-4 mr-2" />
-                          Export
-                        </DropdownMenuItem>
-                        {canWrite && (
+                        {!isDefault && (
+                          <DropdownMenuItem onClick={() => handleExport(env)}>
+                            <Download className="h-4 w-4 mr-2" />
+                            Export
+                          </DropdownMenuItem>
+                        )}
+                        {canWrite && !isDefault && (
                           <DropdownMenuItem
                             onClick={() => onDeleteEnvironment(env.id)}
                             className="text-destructive"

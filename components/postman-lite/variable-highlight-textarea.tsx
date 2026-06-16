@@ -490,6 +490,12 @@ export function VariableHighlightTextarea({
 
     const { selectionStart: ss, selectionEnd: se } = ta
 
+    // Ctrl/Cmd+Enter sends the request (handled by the global shortcut) — don't
+    // insert a newline; let the event through.
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      return
+    }
+
     if (e.key === 'Enter') {
       e.preventDefault()
       const lineStart = localValue.lastIndexOf('\n', ss - 1) + 1

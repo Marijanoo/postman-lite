@@ -48,6 +48,8 @@ import { SocketBuilder } from './socket-builder'
 import { SequenceBuilder } from './sequence-builder'
 import { EnvironmentSelector } from './environment-selector'
 import { EnvironmentProvider } from './environment-context'
+import { isDefaultEnv } from '@/lib/default-environment'
+import { resolveJsonPath } from '@/lib/json-path'
 import { TitleBar } from './title-bar'
 import { SettingsPanel } from './settings-panel'
 import { HelpPanel } from './help-panel'
@@ -57,6 +59,7 @@ import { TextDiff } from './text-diff-panel'
 import { WorkspaceDropdown } from './workspace-dropdown'
 import { WorkspaceInviteDialog } from './workspace-invite-dialog'
 import { WorkspaceQuickInviteDialog } from './workspace-quick-invite-dialog'
+import { LoginDialog } from './login-dialog'
 import { UpdateBar } from './update-bar'
 import { useAuth } from '@/lib/auth/auth-context'
 import type { Workspace, Environment, EnvironmentVariable } from '@/lib/db/types'
@@ -96,6 +99,22 @@ function friendlySocketError(message: string): string {
   return friendlyNetworkError(message)
 }
 
+// Backfill any missing fields so a partial proxy/IPC result is always a complete
+// ResponseData envelope before it reaches the viewer or history.
+function normalizeResponse(r: Partial<ResponseData> | null | undefined): ResponseData {
+  return {
+    status: r?.status ?? 0,
+    statusText: r?.statusText ?? '',
+    headers: r?.headers ?? {},
+    body: r?.body ?? '',
+    size: r?.size ?? 0,
+    time: r?.time ?? 0,
+    contentType: r?.contentType ?? '',
+    isBinary: r?.isBinary ?? false,
+    url: r?.url,
+  }
+}
+
 interface PostmanLiteProps {
   updateProgress?: number | null
   updateDownloaded?: boolean
@@ -106,6 +125,18 @@ interface PostmanLiteProps {
 export function PostmanLite({ updateProgress = null, updateDownloaded = false, onInstallUpdate, onDismissUpdate }: PostmanLiteProps = {}) {
   const { state: authState } = useAuth()
   const currentUser = authState.status === 'authenticated' ? authState.session.user : null
+
+  // On-demand sign-in. requireAuth runs the action immediately if signed in,
+  // otherwise opens the login dialog and defers the action until sign-in succeeds.
+  const [loginPrompt, setLoginPrompt] = useState<{ reason: string; onAuthed?: () => void } | null>(null)
+  const requireAuth = useCallback((reason: string, onAuthed?: () => void) => {
+    if (currentUser) {
+      onAuthed?.()
+      return true
+    }
+    setLoginPrompt({ reason, onAuthed })
+    return false
+  }, [currentUser])
 
   const [isLoading, setIsLoading] = useState(false)
   const [scrollResetKey, setScrollResetKey] = useState(0)
@@ -191,9 +222,18 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
 
   const switchWorkspace = useCallback((id: string) => {
     const target = workspaces.find(w => w.id === id)
+    const isCloud = !!target && (target.isSynced || (target.members?.length ?? 0) > 0)
+    // Cloud workspaces are served by the REST adapter, which needs an account.
+    if (isCloud && !currentUser) {
+      requireAuth('Sign in to open this cloud workspace.', () => {
+        if (id !== activeWorkspaceId) setSwitchingToName(target.name)
+        switchWorkspaceRaw(id)
+      })
+      return
+    }
     if (target && id !== activeWorkspaceId) setSwitchingToName(target.name)
     return switchWorkspaceRaw(id)
-  }, [switchWorkspaceRaw, workspaces, activeWorkspaceId])
+  }, [switchWorkspaceRaw, workspaces, activeWorkspaceId, currentUser, requireAuth])
 
   const createWorkspace = useCallback((name: string) => {
     return createWorkspaceRaw(name, currentUser ?? undefined)
@@ -250,7 +290,8 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
 
   // Called after an environment refresh — handles active environment being deleted
   const checkActiveEnvironmentStillExists = useCallback((refreshedEnvs: Environment[]) => {
-    if (!activeEnvironment) return
+    // The default "No Environment" always exists (it's local) — never treat it as deleted.
+    if (!activeEnvironment || isDefaultEnv(activeEnvironment.id)) return
     if (!refreshedEnvs.some(e => e.id === activeEnvironment.id)) {
       setActiveEnvironment(null)
       setDeletedNotice({ type: 'environment', name: activeEnvironment.name })
@@ -424,6 +465,11 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
 
       if (generation !== requestGenerationRef.current) return
 
+      // Guarantee a complete envelope: the proxy/IPC result can be partial (an
+      // empty body, an unexpected error shape, etc.). Fill missing fields so
+      // consumers (viewer, history) never see undefined.
+      responseData = normalizeResponse(responseData)
+
       // Scroll to top only if the response body changed
       if (responseData.body !== activeTab.response?.body) {
         setScrollResetKey(k => k + 1)
@@ -489,7 +535,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
       const result = await window.electronAPI.makeRequest({ url, method, headers, requestBody, formDataEntries, requestId })
       sequenceElectronRequestIdRef.current = null
       if (result?.aborted || signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-      return result
+      return normalizeResponse(result)
     }
     const res = await fetch('/api/proxy', {
       method: 'POST',
@@ -497,7 +543,26 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
       body: JSON.stringify({ url, method, headers, requestBody, formDataEntries }),
       signal,
     })
-    return res.json()
+    // Mirror the Electron path: treat an abort as an AbortError so the sequence
+    // runner marks the step skipped rather than recording a bogus result.
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    // The proxy normally returns a ResponseData envelope (even for network errors,
+    // as status 0). If the route itself failed and returned non-JSON, surface a
+    // structured error instead of throwing an opaque SyntaxError.
+    try {
+      return normalizeResponse(await res.json())
+    } catch {
+      return {
+        status: res.status || 0,
+        statusText: res.statusText || 'Proxy Error',
+        headers: {},
+        body: JSON.stringify({ error: 'Proxy returned an invalid response.' }, null, 2),
+        size: 0,
+        time: 0,
+        contentType: 'application/json',
+        isBinary: false,
+      }
+    }
   }, [activeEnvironment])
 
   // Walks the full sequence tree and returns a list of missing request descriptions
@@ -582,7 +647,16 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
             reportResult(step.id, { stepId: step.id, status: 'running', subResults: { ...subResults } })
           }
           lastBody = await runSteps(sub.steps, lastBody, new Set([...visited, sub.id]), subReport)
-          const allOk = sub.steps.every(s => subResults[s.id]?.status === 'success' || subResults[s.id]?.status === 'idle')
+          // If the run was aborted, surface the parent step as skipped rather than
+          // falsely reporting success for sub-steps that never ran.
+          if (sequenceAbortRef.current || controller.signal.aborted) {
+            reportResult(step.id, { stepId: step.id, status: 'skipped', subResults: { ...subResults } })
+            continue
+          }
+          // Success only if every sub-step actually completed successfully. A step
+          // left idle (never ran) or errored/skipped means the sub-sequence failed.
+          // An empty sub-sequence is vacuously successful.
+          const allOk = sub.steps.every(s => subResults[s.id]?.status === 'success')
           reportResult(step.id, { stepId: step.id, status: allOk ? 'success' : 'error', subResults: { ...subResults } })
           continue
         }
@@ -597,7 +671,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
             }
             try {
               const parsed = JSON.parse(lastBody)
-              const value = jsonKey!.split('.').reduce((obj, key) => obj?.[key], parsed as any)
+              const value = resolveJsonPath(parsed, jsonKey!)
               if (value === undefined || value === null) {
                 reportResult(step.id, { stepId: step.id, status: 'error', error: `Key "${jsonKey}" not found in response` })
                 continue
@@ -1540,6 +1614,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
           canSave={canWrite && (!!activeTab || !!activeSocketTab)}
           onInviteAccepted={(wsId) => switchWorkspace(wsId)}
           onRefreshWorkspaces={refreshWorkspaces}
+          onRequireAuth={requireAuth}
         />
 
         {updateProgress !== null && (
@@ -1864,12 +1939,6 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
           <span className="text-xs text-red-400">No internet connection — changes may not sync until you reconnect.</span>
         </div>
       )}
-      {isOnline && activeWorkspace?.ownerId === 'local' && (
-        <div className="flex items-center justify-center gap-2 px-3 h-6 bg-yellow-500/10 border-t border-yellow-500/20 shrink-0">
-          <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 shrink-0" />
-          <span className="text-xs text-yellow-500/80">Local workspace — changes are saved to this device only.</span>
-        </div>
-      )}
 
       <SettingsPanel open={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <HelpPanel open={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
@@ -1890,6 +1959,13 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
           onUpdateWorkspace={updateWorkspace}
         />
       )}
+
+      <LoginDialog
+        open={!!loginPrompt}
+        onOpenChange={open => { if (!open) setLoginPrompt(null) }}
+        reason={loginPrompt?.reason}
+        onSuccess={() => { loginPrompt?.onAuthed?.(); setLoginPrompt(null) }}
+      />
 
       {/* Save Request Dialog */}
       <Dialog open={isSaveDialogOpen} onOpenChange={setIsSaveDialogOpen}>

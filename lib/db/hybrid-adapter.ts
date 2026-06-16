@@ -1,8 +1,18 @@
 import type { DatabaseAdapter } from './index'
 import type {
   Workspace, Collection, RequestConfig, SocketConfig,
-  HistoryEntry, Environment, WorkspaceState, Sequence,
+  HistoryEntry, Environment, WorkspaceState, Sequence, WorkspaceMember,
 } from './types'
+
+// Compare two member lists ignoring order. Returns true when both lists contain
+// the same members with the same permission (the only fields that affect access).
+export function membersEqual(a: WorkspaceMember[] = [], b: WorkspaceMember[] = []): boolean {
+  if (a.length !== b.length) return false
+  const key = (m: WorkspaceMember) => `${m.userId}:${m.permission}`
+  const sa = a.map(key).sort()
+  const sb = b.map(key).sort()
+  return sa.every((v, i) => v === sb[i])
+}
 
 // Routes workspace-scoped calls to REST (shared workspaces with members)
 // or SQLite via IPC (personal workspaces with no members).
@@ -72,10 +82,15 @@ export class HybridAdapter implements DatabaseAdapter {
       if (!localIds.has(w.id)) {
         await this.sqlite.createWorkspace({ ...w, isSynced: true }).catch(() => {})
       } else {
-        // Keep local copy in sync with remote membership info
+        // Keep local copy in sync with remote membership info. Compare members
+        // order-independently — the server may return them in a different order,
+        // and an order-sensitive check would trigger a redundant local write on
+        // every poll.
         const remoteMembers = w.members
         const localW = local.find(l => l.id === w.id)
-        if (localW && (JSON.stringify(localW.members) !== JSON.stringify(remoteMembers) || !localW.isSynced)) {
+        const membersChanged = !!localW && !membersEqual(localW.members, remoteMembers)
+        const nameChanged = !!localW && localW.name !== w.name
+        if (localW && (membersChanged || nameChanged || !localW.isSynced)) {
           await this.sqlite.updateWorkspace(w.id, { members: remoteMembers, name: w.name, isSynced: true }).catch(() => {})
         }
       }

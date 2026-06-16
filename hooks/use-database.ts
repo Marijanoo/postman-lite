@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import type {
   Workspace,
   Collection,
@@ -22,6 +22,11 @@ import {
 } from '@/lib/db/types'
 import { generateId } from '@/lib/utils'
 import { useAuth } from '@/lib/auth/auth-context'
+import {
+  isDefaultEnv,
+  makeDefaultEnvironment,
+  setDefaultEnvVariables,
+} from '@/lib/default-environment'
 
 const ACTIVE_WORKSPACE_KEY = 'quence-active-workspace'
 
@@ -40,16 +45,24 @@ function requestsEqual(a: RequestConfig, b: RequestConfig): boolean {
   return stable(strip(a)) === stable(strip(b))
 }
 
+// Stable id used for local-only (signed-out) usage. Local workspaces are owned
+// by 'local' and never sync to the cloud, so anonymous users get the full app
+// without an account; signing in is only required for cloud workspaces/invites.
+const LOCAL_USER_ID = 'local'
+
 // Generic database hook (shared singleton)
 function useDatabase() {
   const { state } = useAuth()
-  const userId = state.status === 'authenticated' ? state.session.user.id : undefined
+  // Fall back to the local id while signed out so the local DB still initializes.
+  const userId = state.status === 'authenticated' ? state.session.user.id : LOCAL_USER_ID
 
   const [db, setDb] = useState<import('@/lib/db').DatabaseAdapter | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    if (!userId) return
+    // Don't initialize until auth has resolved — avoids briefly opening the
+    // local DB and then re-opening it once a session is restored.
+    if (state.status === 'loading') return
     async function initDb() {
       const { getDatabase } = await import('@/lib/db')
       const database = await getDatabase(userId)
@@ -57,7 +70,7 @@ function useDatabase() {
       setIsLoading(false)
     }
     initDb()
-  }, [userId])
+  }, [userId, state.status])
 
   return { db, isLoading }
 }
@@ -85,12 +98,13 @@ export function useWorkspaceManager() {
   }, [db])
 
   useEffect(() => {
-    if (!db || dbLoading || !currentUser) return
+    if (!db || dbLoading) return
     ;(async () => {
       const data = await refresh()
 
       if (data.length === 0) {
-        // First run: create default workspace
+        // First run: create default workspace. Signed-out users get a local
+        // workspace (owner defaults to 'local'); signed-in users own it.
         const ws = createNewWorkspace('My Workspace', currentUser)
         await db.createWorkspace(ws)
 
@@ -454,7 +468,10 @@ export function useHistory(workspaceId?: string | null, limit = 50) {
 // Environments hook
 export function useEnvironments(workspaceId?: string | null) {
   const { db, isLoading: dbLoading } = useDatabase()
+  // Real (DB-backed) environments.
   const [environments, setEnvironments] = useState<Environment[]>([])
+  // Bumped whenever the local "No Environment" variables change, to re-synthesize.
+  const [defaultEnvVersion, setDefaultEnvVersion] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
 
   const refresh = useCallback(async () => {
@@ -472,7 +489,17 @@ export function useEnvironments(workspaceId?: string | null) {
     }
   }, [db, dbLoading, refresh])
 
-  const activeEnvironment = environments.find(e => e.isActive)
+  // The "No Environment" default is active whenever no real environment is.
+  const activeRealEnv = environments.find(e => e.isActive)
+  const defaultEnv = useMemo(
+    () => makeDefaultEnvironment(workspaceId, !activeRealEnv),
+    // defaultEnvVersion forces a re-read of the local variables after edits.
+    [workspaceId, activeRealEnv, defaultEnvVersion],
+  )
+
+  // Surface the default first, followed by user-created environments.
+  const allEnvironments = useMemo(() => [defaultEnv, ...environments], [defaultEnv, environments])
+  const activeEnvironment = activeRealEnv ?? defaultEnv
 
   const create = useCallback(async (name: string) => {
     if (!db) return
@@ -483,20 +510,29 @@ export function useEnvironments(workspaceId?: string | null) {
   }, [db, refresh, workspaceId])
 
   const update = useCallback(async (id: string, data: Partial<Environment>) => {
+    // Edits to the default env are persisted locally, not in the DB.
+    if (isDefaultEnv(id)) {
+      if (data.variables) {
+        setDefaultEnvVariables(workspaceId, data.variables)
+        setDefaultEnvVersion(v => v + 1)
+      }
+      return
+    }
     if (!db) return
     await db.updateEnvironment(id, data)
     await refresh()
-  }, [db, refresh])
+  }, [db, refresh, workspaceId])
 
   const remove = useCallback(async (id: string) => {
-    if (!db) return
+    if (!db || isDefaultEnv(id)) return // the default env can't be deleted
     await db.deleteEnvironment(id)
     await refresh()
   }, [db, refresh])
 
   const setActive = useCallback(async (id: string | null) => {
     if (!db) return
-    await db.setActiveEnvironment(id, workspaceId ?? undefined)
+    // Selecting the default (or "none") just clears the active real environment.
+    await db.setActiveEnvironment(isDefaultEnv(id) ? null : id, workspaceId ?? undefined)
     await refresh()
   }, [db, refresh, workspaceId])
 
@@ -507,7 +543,7 @@ export function useEnvironments(workspaceId?: string | null) {
   }, [db, refresh, workspaceId])
 
   return {
-    environments,
+    environments: allEnvironments,
     activeEnvironment,
     isLoading: isLoading || dbLoading,
     create,

@@ -118,11 +118,10 @@ function estimateHeight(line: string): number {
   return wrappedLines * LINE_HEIGHT
 }
 
-function JsonViewer({ data, query, activeMatch, activeMatchRef, scrollRef }: {
+function JsonViewer({ data, query, activeMatch, scrollRef }: {
   data: string
   query: string
   activeMatch: number
-  activeMatchRef: React.RefObject<HTMLElement | null>
   scrollRef: React.RefObject<HTMLDivElement | null>
 }) {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
@@ -195,6 +194,47 @@ function JsonViewer({ data, query, activeMatch, activeMatchRef, scrollRef }: {
 
   const totalHeight = cumulativeOffsets.current[visibleLineIndices.length] ?? 0
 
+  // Scroll the active search match into view. In a virtualized list the target
+  // row is usually not in the DOM, so we can't rely on scrollIntoView on a ref —
+  // instead we locate the line holding the active match and scroll the container
+  // to that line's known pixel offset.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !query) return
+
+    // Find the line index whose match range contains activeMatch.
+    let targetLine = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (hiddenLines.has(i)) continue
+      const before = lineOffsets[i] ?? 0
+      const count = countMatches(lines[i], query)
+      if (count > 0 && activeMatch >= before && activeMatch < before + count) {
+        targetLine = i
+        break
+      }
+    }
+    if (targetLine === -1) return
+
+    // Map the line to its position in the virtualized (visible) list, then to px.
+    const vi = visibleLineIndices.indexOf(targetLine)
+    if (vi === -1) return
+    const offsets = cumulativeOffsets.current
+    const top = offsets[vi] ?? 0
+    const bottom = offsets[vi + 1] ?? top + LINE_HEIGHT
+
+    // Only scroll when the line is outside the current viewport (block: 'nearest').
+    const viewTop = el.scrollTop
+    const viewBottom = viewTop + el.clientHeight
+    if (top < viewTop) {
+      el.scrollTo({ top, behavior: 'smooth' })
+    } else if (bottom > viewBottom) {
+      el.scrollTo({ top: bottom - el.clientHeight, behavior: 'smooth' })
+    }
+    // cumulativeOffsets/lineOffsets are refs/memo recomputed on the same inputs;
+    // activeMatch is the trigger for navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMatch, query, lines, hiddenLines, lineOffsets, visibleLineIndices, scrollRef])
+
   // Binary search: find first visible index whose bottom edge > scrollTop
   const findStartIdx = (top: number): number => {
     const offsets = cumulativeOffsets.current
@@ -261,9 +301,6 @@ function JsonViewer({ data, query, activeMatch, activeMatchRef, scrollRef }: {
       {visibleLineIndices.slice(startVisibleIdx, endVisibleIdx + 1).map((i, idx) => {
         const vi = startVisibleIdx + idx
         const offset = lineOffsets[i] ?? 0
-        const count = countMatches(lines[i], query)
-        const localActive = activeMatch - offset
-        const hasActive = !!query && localActive >= 0 && localActive < count
         const isFoldable = foldRanges.has(i)
         const isCollapsed = collapsed.has(i)
         const closer = foldRanges.get(i)
@@ -281,7 +318,6 @@ function JsonViewer({ data, query, activeMatch, activeMatchRef, scrollRef }: {
             ref={el => {
               if (el) rowRefs.current.set(vi, el)
               else rowRefs.current.delete(vi)
-              if (hasActive) (activeMatchRef as React.MutableRefObject<HTMLElement | null>).current = el
             }}
             className={`flex items-start rounded-[2px] ${isSelected ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
             onClick={() => setSelectedLine(i === selectedLine ? null : i)}
@@ -321,7 +357,6 @@ export function CodeViewer({ data, language = 'auto', className, scrollResetKey 
   const [currentMatch, setCurrentMatch] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const activeMatchRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (scrollResetKey !== undefined && scrollContainerRef.current) {
@@ -351,10 +386,8 @@ export function CodeViewer({ data, language = 'auto', className, scrollResetKey 
     else setCurrentMatch(prev => Math.min(prev, matchCount - 1))
   }, [matchCount])
 
-  useEffect(() => {
-    if (!searchOpen || !query) return
-    activeMatchRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [currentMatch, searchOpen, query])
+  // Scrolling to the active match is handled inside JsonViewer, which knows the
+  // virtualized layout offsets (a DOM ref can't work when the row isn't rendered).
 
   const openSearch = useCallback(() => setSearchOpen(true), [])
   const closeSearch = useCallback(() => { setSearchOpen(false); setQuery(''); setCurrentMatch(0) }, [])
@@ -382,7 +415,7 @@ export function CodeViewer({ data, language = 'auto', className, scrollResetKey 
       )}
       {isJson ? (
         <div ref={scrollContainerRef} className="flex-1 overflow-auto p-4 min-w-0">
-          <JsonViewer data={data} query={searchOpen ? query : ''} activeMatch={currentMatch} activeMatchRef={activeMatchRef} scrollRef={scrollContainerRef} />
+          <JsonViewer data={data} query={searchOpen ? query : ''} activeMatch={currentMatch} scrollRef={scrollContainerRef} />
         </div>
       ) : (
         <HtmlViewer data={data} />
