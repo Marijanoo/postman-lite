@@ -87,6 +87,21 @@ export function VariableHighlightInput({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey])
 
+  // Also sync when `value` changes for a reason other than this input's own
+  // edits echoing back — e.g. a param row's value gets rewritten because the
+  // URL bar's query string changed. lastEmittedValueRef holds whatever this
+  // input itself last sent upstream, so comparing against it (rather than
+  // resetting on every prop change) tells an external update apart from our
+  // own committed keystroke bouncing back, which would otherwise revert the
+  // field mid-edit.
+  useEffect(() => {
+    if (value !== lastEmittedValueRef.current) {
+      setLocalValue(value)
+      lastEmittedValueRef.current = value
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+
   // Capture the input's computed font size so the overlay can match it exactly
   useEffect(() => {
     if (bare && inputRef.current) {
@@ -118,7 +133,11 @@ export function VariableHighlightInput({
     setLocalValue(newValue)
     lastEmittedValueRef.current = newValue
     if (immediate) {
-      debouncedOnChange(newValue) // This will clear pending
+      // Cancel any pending debounced call rather than rescheduling it — firing
+      // now makes a later duplicate redundant, and if left armed it would
+      // replay this same (increasingly stale) value 300ms from now, clobbering
+      // whatever changed in the meantime.
+      cancelDebouncedOnChange()
       onChange(newValue)
     } else {
       debouncedOnChange(newValue)

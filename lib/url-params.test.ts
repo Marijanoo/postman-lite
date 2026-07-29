@@ -90,6 +90,26 @@ describe('searchToParams', () => {
     expect(a.enabled).toBe(true)
     expect(z.enabled).toBe(false)
   })
+
+  it('does not duplicate a param that was matched from a disabled entry', () => {
+    // Regression: matching a disabled existing param and then also keeping it
+    // in the "preserve disabled" pass produced the same key twice.
+    const existing = [kv('a', 'old', false)]
+    const result = searchToParams('a=new', existing)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ key: 'a', value: 'new', enabled: true })
+  })
+
+  it('gives repeated keys distinct ids instead of colliding on one existing entry', () => {
+    // Regression: "tag=a&tag=b" both matched the single existing "tag" param,
+    // producing two rows with the same id — editing/deleting one affected both.
+    const existing = [kv('tag', 'old')]
+    const result = searchToParams('tag=a&tag=b', existing)
+    expect(result).toHaveLength(2)
+    expect(result[0].value).toBe('a')
+    expect(result[1].value).toBe('b')
+    expect(result[0].id).not.toBe(result[1].id)
+  })
 })
 
 describe('ensureProtocol', () => {

@@ -54,13 +54,24 @@ export function paramsToSearch(params: KeyValuePair[]): string {
 
 export function searchToParams(search: string, existing: KeyValuePair[]): KeyValuePair[] {
   if (!search) return []
+  // Track which existing entries have already been reused so that (a) repeated
+  // keys in the query string ("tag=a&tag=b") don't all collide onto the same
+  // existing id — the editor identifies rows by id, so duplicate ids make rows
+  // impossible to edit or delete independently — and (b) a matched-but-disabled
+  // entry isn't *also* kept in the leftover "preserve disabled params" pass
+  // below, which would otherwise show the same key twice.
+  const used = new Set<number>()
   const pairs = search.split('&').map(part => {
     const eq = part.indexOf('=')
     const key = decodeComponent(eq === -1 ? part : part.slice(0, eq))
     const value = eq === -1 ? '' : decodeComponent(part.slice(eq + 1))
-    const found = existing.find(p => p.key === key)
-    return found ? { ...found, value, enabled: true } : { ...createKeyValuePair(key, value), enabled: true }
+    const foundIdx = existing.findIndex((p, i) => p.key === key && !used.has(i))
+    if (foundIdx !== -1) {
+      used.add(foundIdx)
+      return { ...existing[foundIdx], value, enabled: true }
+    }
+    return { ...createKeyValuePair(key, value), enabled: true }
   })
-  const disabled = existing.filter(p => !p.enabled && p.key)
+  const disabled = existing.filter((p, i) => !used.has(i) && !p.enabled && p.key)
   return [...pairs, ...disabled]
 }

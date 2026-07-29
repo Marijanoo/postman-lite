@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   scanSwagger: (dirPath: string) => ipcRenderer.invoke('fs:scanSwagger', { dirPath }),
+  openExternal: (url: string) => ipcRenderer.send('open-external', url),
 
   db: {
     auth: {

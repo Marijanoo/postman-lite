@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type {
   Workspace,
   Collection,
@@ -221,10 +221,17 @@ export function useCollections(workspaceId?: string | null) {
   const { db, isLoading: dbLoading } = useDatabase()
   const [collections, setCollections] = useState<Collection[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  // Discards a fetch response if a newer one has started since — otherwise a
+  // slow-resolving fetch for a previously active workspace can land after a
+  // faster one for the newly switched-to workspace, overwriting it with the
+  // wrong workspace's data. See useSequences for the fuller explanation.
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!db || !workspaceId) return
+    const requestId = ++requestIdRef.current
     const data = await db.getCollections(workspaceId)
+    if (requestId !== requestIdRef.current) return
     setCollections(data.sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt)))
   }, [db, workspaceId])
 
@@ -286,10 +293,14 @@ export function useRequests(collectionId?: string) {
   const { db, isLoading: dbLoading } = useDatabase()
   const [requests, setRequests] = useState<RequestConfig[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  // See useSequences for why a request-generation guard is needed here.
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!db) return
+    const requestId = ++requestIdRef.current
     const data = await db.getRequests(collectionId)
+    if (requestId !== requestIdRef.current) return
     setRequests(data.sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt)))
   }, [db, collectionId])
 
@@ -346,10 +357,14 @@ export function useSocketConfigs() {
   const { db, isLoading: dbLoading } = useDatabase()
   const [socketConfigs, setSocketConfigs] = useState<SocketConfig[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  // See useSequences for why a request-generation guard is needed here.
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!db) return
+    const requestId = ++requestIdRef.current
     const data = await db.getSocketConfigs()
+    if (requestId !== requestIdRef.current) return
     setSocketConfigs(data.sort((a, b) => (a.order ?? a.createdAt) - (b.order ?? b.createdAt)))
   }, [db])
 
@@ -391,10 +406,19 @@ export function useSequences(workspaceId?: string | null) {
   const { db, isLoading: dbLoading } = useDatabase()
   const [sequences, setSequences] = useState<Sequence[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  // A cloud workspace's getSequences() goes over the network (RestAdapter)
+  // while a personal one resolves fast over local IPC/SQLite. Switching from
+  // a slow workspace to a fast one can let the old fetch resolve *after* the
+  // new one already populated `sequences` — silently overwriting it with the
+  // previous workspace's data. This counter discards any response that isn't
+  // from the most recently started fetch.
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!db) return
+    const requestId = ++requestIdRef.current
     const data = await db.getSequences(workspaceId ?? undefined)
+    if (requestId !== requestIdRef.current) return
     setSequences(data.sort((a, b) => a.createdAt - b.createdAt))
   }, [db, workspaceId])
 
@@ -430,10 +454,14 @@ export function useHistory(workspaceId?: string | null, limit = 50) {
   const { db, isLoading: dbLoading } = useDatabase()
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  // See useSequences for why a request-generation guard is needed here.
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!db) return
+    const requestId = ++requestIdRef.current
     const data = await db.getHistory(workspaceId ?? undefined, limit)
+    if (requestId !== requestIdRef.current) return
     setHistory(data)
   }, [db, workspaceId, limit])
 
@@ -473,10 +501,14 @@ export function useEnvironments(workspaceId?: string | null) {
   // Bumped whenever the local "No Environment" variables change, to re-synthesize.
   const [defaultEnvVersion, setDefaultEnvVersion] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  // See useSequences for why a request-generation guard is needed here.
+  const requestIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!db) return
+    const requestId = ++requestIdRef.current
     const data = await db.getEnvironments(workspaceId ?? undefined)
+    if (requestId !== requestIdRef.current) return
     const sorted = data.sort((a, b) => a.name.localeCompare(b.name))
     setEnvironments(sorted)
     return sorted

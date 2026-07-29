@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import serve from 'electron-serve'
@@ -177,6 +177,15 @@ app.on('ready', () => {
   ipcMain.on('window-zoom-out', () => {
     if (!mainWindow) return
     mainWindow.webContents.setZoomLevel(mainWindow.webContents.getZoomLevel() - 0.5)
+  })
+
+  // Only http(s) — response bodies are untrusted content, and shell.openExternal
+  // on an arbitrary scheme (file://, custom protocol handlers, etc.) can be
+  // abused to reach outside the browser sandbox.
+  ipcMain.on('open-external', (_e, url: unknown) => {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      shell.openExternal(url)
+    }
   })
 
   // ── WebSocket proxy ─────────────────────────────────────────────────────────

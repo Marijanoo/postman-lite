@@ -11,6 +11,14 @@ export function computeFoldRanges(lines: string[]): Map<number, number> {
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trimEnd()
+
+    // Inline empty collection (e.g. `"tags": [],` or `{}`) opens and closes on
+    // the same line — it's never pushed onto the stack, so it must not be
+    // treated as a closer either, or it pops the wrong (unrelated) opener and
+    // corrupts bracket matching for the rest of the document.
+    const withoutComma = trimmed.endsWith(',') ? trimmed.slice(0, -1) : trimmed
+    if (withoutComma.endsWith('{}') || withoutComma.endsWith('[]')) continue
+
     const last = trimmed[trimmed.length - 1]
     const secondLast = trimmed[trimmed.length - 2]
 
@@ -55,7 +63,9 @@ export function computeHiddenLines(
   for (const opener of collapsed) {
     const closer = ranges.get(opener)
     if (closer === undefined) continue
-    for (let i = opener + 1; i < closer; i++) {
+    // Hide the closer line too — the fold summary already synthesizes a
+    // closing bracket, so rendering the real one as well would duplicate it.
+    for (let i = opener + 1; i <= closer; i++) {
       hidden.add(i)
     }
   }

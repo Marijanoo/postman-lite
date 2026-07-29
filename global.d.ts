@@ -28,6 +28,7 @@ declare global {
       wsRemoveListeners: () => void
       openDirectory?: () => Promise<string | null>
       scanSwagger?: (dirPath: string) => Promise<{ path: string; content: string }[]>
+      openExternal?: (url: string) => void
       db: {
         auth: {
           login: (email: string, password: string) => Promise<{ id: string; email: string; name: string }>
