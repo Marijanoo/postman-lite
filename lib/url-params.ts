@@ -29,8 +29,21 @@ export function splitUrl(url: string): { base: string; search: string } {
 // %20). We deliberately do NOT use the '+'-for-space convention on encode: it
 // makes a literal '+' in a value ambiguous on round-trip. A space becomes %20
 // and a literal '+' becomes %2B, so the two never collide.
+//
+// {{variable}} placeholders are left completely unencoded: encodeURIComponent
+// would otherwise turn "{{token}}" into "%7B%7Btoken%7D%7D" in the URL bar.
+// The request itself would still resolve correctly (buildRequest reads the
+// param's raw value, not the URL string), but the URL bar would show garbled
+// text instead of a highlightable, editable variable placeholder.
 function encodeComponent(s: string): string {
-  return encodeURIComponent(s)
+  let result = ''
+  let lastIndex = 0
+  for (const match of s.matchAll(/\{\{[^{}]*\}\}/g)) {
+    const start = match.index ?? 0
+    result += encodeURIComponent(s.slice(lastIndex, start)) + match[0]
+    lastIndex = start + match[0].length
+  }
+  return result + encodeURIComponent(s.slice(lastIndex))
 }
 
 // Decode tolerantly. We still treat '+' as a space here so that a query string

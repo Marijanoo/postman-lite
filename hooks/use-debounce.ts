@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 
 export function useDebouncedCallback<T extends (...args: any[]) => any>(
   callback: T,
@@ -32,4 +32,18 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
   }, [])
 
   return [debounced, cancel]
+}
+
+// Returns a copy of `value` that only updates `delay` ms after `value` stops
+// changing — for deferring expensive derived work (e.g. a diff computation)
+// without throttling the input itself, which should stay instantly responsive.
+export function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+
+  return debounced
 }

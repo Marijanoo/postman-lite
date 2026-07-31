@@ -4,7 +4,7 @@ import { version } from '@/package.json'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import type { RequestConfig, ResponseData, HistoryEntry, Collection, SocketConfig, SocketTab, SocketMessage, SocketMessageType, SocketProtocol, Sequence, SequenceStep, SequenceStepResult } from '@/lib/db/types'
 import { createNewRequest, createNewSocketConfig } from '@/lib/db/types'
-import { generateId } from '@/lib/utils'
+import { generateId, uniqueName } from '@/lib/utils'
 import {
   useWorkspaceManager,
   useCollections,
@@ -1137,9 +1137,12 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
       : activeTab
     if (!tabToSave || !saveCollectionId || !saveRequestName.trim()) return
 
+    // Names only need to be unique within the target collection — other
+    // collections (even in the same workspace) can reuse the same name.
+    const siblingNames = requests.filter(r => r.collectionId === saveCollectionId).map(r => r.name)
     const request: RequestConfig = {
       ...tabToSave.request,
-      name: saveRequestName.trim(),
+      name: uniqueName(saveRequestName.trim(), siblingNames),
       collectionId: saveCollectionId,
     }
 
@@ -1164,7 +1167,7 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
         if (target) setActiveSocketTabId(target.id)
       }
     }
-  }, [activeTab, tabs, pendingCloseTabId, saveCollectionId, saveRequestName, createRequest, markTabSaved, updateTab, refreshRequests, closeTab, socketTabs, tabOrder, setActiveSocketTabId])
+  }, [activeTab, tabs, pendingCloseTabId, saveCollectionId, saveRequestName, requests, createRequest, markTabSaved, updateTab, refreshRequests, closeTab, socketTabs, tabOrder, setActiveSocketTabId])
 
   // Open save dialog (or save directly if already part of a collection)
   const openSaveDialog = useCallback(async () => {
@@ -1665,11 +1668,16 @@ export function PostmanLite({ updateProgress = null, updateDownloaded = false, o
             onOpenRequest={openRequest}
             onDeleteRequest={canWrite ? removeRequest : () => {}}
             onRenameRequest={canWrite ? (id, name) => {
-              updateRequest(id, { name })
-              tabs.forEach(t => { if (t.requestId === id) updateTab(t.id, { request: { ...t.request, name }, savedRequest: t.savedRequest ? { ...t.savedRequest, name } : undefined }) })
+              // Uniqueness is scoped to the request's own collection — the
+              // same name is fine in a different collection.
+              const target = requests.find(r => r.id === id)
+              const siblingNames = requests.filter(r => r.collectionId === target?.collectionId && r.id !== id).map(r => r.name)
+              const finalName = uniqueName(name, siblingNames)
+              updateRequest(id, { name: finalName })
+              tabs.forEach(t => { if (t.requestId === id) updateTab(t.id, { request: { ...t.request, name: finalName }, savedRequest: t.savedRequest ? { ...t.savedRequest, name: finalName } : undefined }) })
               sequences.forEach(seq => {
                 const hasMatch = seq.steps.some(s => s.requestId === id)
-                if (hasMatch) updateSequence(seq.id, { steps: seq.steps.map(s => s.requestId === id ? { ...s, name } : s) })
+                if (hasMatch) updateSequence(seq.id, { steps: seq.steps.map(s => s.requestId === id ? { ...s, name: finalName } : s) })
               })
             } : () => {}}
             onRenameSocketConfig={canWrite ? (id, name) => {

@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-react'
+import { useDebouncedValue } from '@/hooks/use-debounce'
 
 // ── LCS diff (generic) ────────────────────────────────────────────────────────
 
@@ -170,7 +171,14 @@ export function TextDiff({
   const activeMatchRef = useRef<HTMLDivElement | null>(null)
   const diffRef = useRef<HTMLDivElement>(null)
 
-  const lines = useMemo(() => diffLines(text1.split('\n'), text2.split('\n')), [text1, text2])
+  // The diff (line-level LCS, plus a character-level LCS per changed line) is
+  // O(n*m) and gets expensive on large pasted text — debounce the inputs it
+  // runs on so it recomputes once typing pauses, rather than on every
+  // keystroke. The textareas themselves stay on the undebounced text1/text2,
+  // so typing itself is never throttled.
+  const debouncedText1 = useDebouncedValue(text1, 300)
+  const debouncedText2 = useDebouncedValue(text2, 300)
+  const lines = useMemo(() => diffLines(debouncedText1.split('\n'), debouncedText2.split('\n')), [debouncedText1, debouncedText2])
 
   const { adds, removes } = useMemo(() => {
     let adds = 0, removes = 0

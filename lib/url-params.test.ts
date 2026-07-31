@@ -46,6 +46,27 @@ describe('paramsToSearch', () => {
   it('skips disabled and keyless params', () => {
     expect(paramsToSearch([kv('a', '1', false), kv('', '2')])).toBe('')
   })
+
+  it('leaves a {{variable}} placeholder in a value unencoded', () => {
+    // Regression: encodeURIComponent turned "{{token}}" into "%7B%7Btoken%7D%7D",
+    // which broke the URL bar's variable highlighting/editing even though the
+    // request itself still resolved correctly at send time.
+    expect(paramsToSearch([kv('token', '{{authToken}}')])).toBe('token={{authToken}}')
+  })
+
+  it('leaves a {{variable}} placeholder in a key unencoded', () => {
+    expect(paramsToSearch([kv('{{paramName}}', 'v')])).toBe('{{paramName}}=v')
+  })
+
+  it('encodes text around a {{variable}} placeholder normally', () => {
+    expect(paramsToSearch([kv('q', 'prefix {{token}} suffix')])).toBe('q=prefix%20{{token}}%20suffix')
+  })
+
+  it('round-trips a {{variable}} placeholder through searchToParams', () => {
+    const search = paramsToSearch([kv('token', '{{authToken}}')])
+    const [p] = searchToParams(search, [])
+    expect(p.value).toBe('{{authToken}}')
+  })
 })
 
 describe('searchToParams', () => {

@@ -17,6 +17,16 @@ export function openExternalUrl(url: string): void {
   }
 }
 
+// Appends " (1)", " (2)", etc. until `name` doesn't collide with anything in
+// `existingNames` — e.g. for keeping request names unique within a
+// collection when saving or renaming.
+export function uniqueName(name: string, existingNames: string[]): string {
+  if (!existingNames.includes(name)) return name
+  let n = 1
+  while (existingNames.includes(`${name} (${n})`)) n++
+  return `${name} (${n})`
+}
+
 // crypto.randomUUID() requires a secure context (HTTPS or localhost).
 // This fallback uses Math.random so the app works over plain HTTP (e.g. LAN access).
 export function generateId(): string {
